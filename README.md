@@ -12,9 +12,9 @@
 
 This project is an interactive chemistry learning website built to support Year 11 students in understanding **Avogadro's constant**.
 
-The website was created during a chemistry mentoring program after observing that students often found abstract chemistry concepts difficult to visualise through textbook explanations alone. It presents the concept in a guided, visual, and interactive way to make the learning process more accessible.
+The website was created during a chemistry mentoring program after observing that some students found abstract chemistry concepts difficult to visualise through textbook explanations alone. It presents the concept in a guided, visual, and interactive way to make the learning process more accessible.
 
-The project demonstrates the use of web development to solve a real education problem, combining subject knowledge, teaching experience, and simple product design.
+The project demonstrates how simple web development can be used to solve a real education problem by combining subject knowledge, teaching experience, and product thinking.
 
 ---
 
@@ -26,13 +26,13 @@ https://y11chem-avog-c.netlify.app/
 
 ## Features
 
-| Feature                   | Description                                       |
-| ------------------------- | ------------------------------------------------- |
-| Interactive learning flow | Guides students through the concept step by step  |
-| Visual explanation        | Makes Avogadro's constant easier to understand    |
-| Student-friendly design   | Designed for Year 11 chemistry learners           |
-| Browser-based access      | Runs directly in the browser with no installation |
-| Netlify deployment        | Publicly deployed and accessible online           |
+| Feature                   | Description                                                |
+| ------------------------- | ---------------------------------------------------------- |
+| Interactive learning flow | Guides students through Avogadro's constant step by step   |
+| Visual explanation        | Makes an abstract chemistry concept easier to understand   |
+| Student-friendly design   | Designed for Year 11 chemistry learners                    |
+| Browser-based access      | Runs directly in the browser with no installation required |
+| Netlify deployment        | Publicly deployed and accessible online                    |
 
 ---
 
@@ -82,7 +82,7 @@ No installation or additional packages are required.
 
 ## Project Motivation
 
-Avogadro's constant is a challenging topic because it connects microscopic particles with measurable chemical amounts. Students may memorise the number, but still struggle to understand what it represents.
+Avogadro's constant can be difficult for students because it connects microscopic particles with measurable chemical amounts. Students may memorise the number, but still struggle to understand what it actually represents.
 
 This project was built to make the concept more intuitive by turning the explanation into a simple interactive learning experience.
 
@@ -90,15 +90,16 @@ This project was built to make the concept more intuitive by turning the explana
 
 ## What This Project Demonstrates
 
-* Ability to identify a real user learning problem
-* Basic front-end development using HTML, CSS, and JavaScript
-* Deployment of a live website through Netlify
-* Use of GitHub for project documentation and version control
-* Communication of abstract scientific ideas through interactive design
+* Identifying a real learning problem from mentoring experience
+* Building a simple front-end project with HTML, CSS, and JavaScript
+* Designing an interactive explanation for an abstract science concept
+* Deploying a working website through Netlify
+* Using GitHub for project documentation and version control
+* Communicating technical and scientific ideas in a student-friendly way
 
 ---
 
-## Resume Summary
+## Project Highlight
 
 **Interactive Chemistry Learning Website | HTML, CSS, JavaScript, GitHub, Netlify**
 
