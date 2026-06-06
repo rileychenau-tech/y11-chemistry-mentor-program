@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Avogadro's Constant — Interactive</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width:100%; height:100%; overflow:hidden; background:#ffffff; color:#111827; font-family:'Segoe UI',system-ui,sans-serif; transition:background 0.7s; }
+canvas { position:absolute; inset:0; }
+#ui { position:absolute; inset:0; display:flex; flex-direction:column; pointer-events:none; }
+
+#top {
+  padding:22px 32px 14px;
+  background:linear-gradient(180deg,rgba(255,255,255,0.97) 75%,transparent);
+  text-align:center; transition:background 0.7s;
+}
+#stage-title { font-size:1.9rem; font-weight:700; color:#111827; min-height:2.4rem; transition:color 0.5s; }
+#instruction  { font-size:1.05rem; color:#111827; margin-top:8px; min-height:3.6em; line-height:1.65; max-height:70vh; overflow:visible; transition:color 0.5s; }
+#counter      { font-size:1.1rem;  color:#111827; margin-top:6px; min-height:1.8em; transition:color 0.5s; }
+
+#bottom {
+  margin-top:auto; padding:18px 32px;
+  background:linear-gradient(0deg,rgba(255,255,255,0.97) 75%,transparent);
+  display:flex; justify-content:center; align-items:center; gap:20px;
+  pointer-events:all; transition:background 0.7s;
+}
+#hint { font-size:0.88rem; color:#6b7280; transition:color 0.5s; }
+#btn-next {
+  padding:11px 34px; font-size:1rem; font-weight:600;
+  background:#3b82f6; color:#fff; border:none; border-radius:10px;
+  cursor:pointer; min-width:130px;
+  transition:background 0.2s, transform 0.1s, opacity 0.3s;
+}
+#btn-next:hover:not(:disabled) { background:#2563eb; transform:translateY(-1px); }
+#btn-next:disabled { opacity:0.22; cursor:default; transform:none; }
+
+/* All text: black bold for emphasis */
+.hl  { color:#111827; font-weight:700; }
+.blu { color:#111827; font-weight:700; }
+.red { color:#111827; font-weight:700; }
+.mark {
+  background:#bfdbfe; color:#111827; font-weight:700;
+  border-radius:5px; padding:2px 8px; display:inline-block;
+}
+
+/* ── Universe / dark mode (atom stages) ─────────────────────────── */
+body.dark { background:#030712; }
+body.dark #top    { background:linear-gradient(180deg,rgba(3,7,18,0.96) 75%,transparent); }
+body.dark #bottom { background:linear-gradient(0deg, rgba(3,7,18,0.96) 75%,transparent); }
+body.dark #stage-title { color:#f1f5f9; }
+body.dark #instruction  { color:#cbd5e1; }
+body.dark #counter      { color:#e2e8f0; }
+body.dark #hint         { color:#475569; }
+body.dark .hl  { color:#f1f5f9; }
+body.dark .blu { color:#f1f5f9; }
+body.dark .red { color:#f1f5f9; }
+body.dark .mark { background:rgba(59,130,246,0.22); color:#93c5fd; }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="ui">
+  <div id="top">
+    <div id="stage-title"></div>
+    <div id="instruction"></div>
+    <div id="counter"></div>
+  </div>
+  <div id="bottom">
+    <div id="hint"></div>
+    <button id="btn-next" disabled>Next →</button>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+// ── Canvas + device pixel ratio (sharp on retina) ────────────────────
+const canvas = document.getElementById('canvas');
+const ctx    = canvas.getContext('2d');
+let W = 0, H = 0;
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width  = W * dpr; canvas.height = H * dpr;
+  canvas.style.width  = W + 'px'; canvas.style.height = H + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+window.addEventListener('resize', resize); resize();
+
+// ── DOM ──────────────────────────────────────────────────────────────
+const elTitle = document.getElementById('stage-title');
+const elInstr = document.getElementById('instruction');
+const elCount = document.getElementById('counter');
+const elHint  = document.getElementById('hint');
+const btnNext = document.getElementById('btn-next');
+
+// ── State ─────────────────────────────────────────────────────────────
+let items = [], groups = [], bgStars = [];
+let dozenCount = 0, stageIdx = -1, busy = false, atomClicks = 0, moleR = 0;
+
+// ── Planet colour palette ──────────────────────────────────────────────
+const PLANET_PALETTE = [
+  { fill:'#60a5fa', glow:'#3b82f6' },
+  { fill:'#f87171', glow:'#dc2626' },
+  { fill:'#fcd34d', glow:'#d97706' },
+  { fill:'#a78bfa', glow:'#7c3aed' },
+  { fill:'#34d399', glow:'#059669' },
+  { fill:'#fb923c', glow:'#ea580c' },
+  { fill:'#f0abfc', glow:'#c026d3' },
+  { fill:'#94a3b8', glow:'#64748b' },
+];
+
+// ── Background star field ──────────────────────────────────────────────
+function generateBgStars() {
+  bgStars = Array.from({ length:220 }, () => ({
+    x: Math.random() * W,
+    y: Math.random() * H,
+    r: Math.random() * 0.9 + 0.15,
+    baseAlpha: Math.random() * 0.5 + 0.15,
+    speed: Math.random() * 1.8 + 0.3,
+    phase: Math.random() * Math.PI * 2,
+  }));
+}
+
+// ── Star path (5-pointed) ─────────────────────────────────────────────
+function starPath(x, y, r, ri) {
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const rad   = i % 2 === 0 ? r : ri;
+    const angle = (Math.PI / 5) * i - Math.PI / 2;
+    const px = x + rad * Math.cos(angle);
+    const py = y + rad * Math.sin(angle);
+    i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+}
+
+// ── Draw star ─────────────────────────────────────────────────────────
+function drawStar(it) {
+  const { x, y, size, alpha, selected, grouped, animation, animPhase, animBorn } = it;
+  ctx.save();
+
+  // Born-pop: scale 1.3 → 1.0 over 500 ms
+  const popT   = animBorn ? Math.min(1, (performance.now() - animBorn) / 500) : 1;
+  const pop    = popT < 1 ? 1 + 0.30 * (1 - popT) * (1 - popT) : 1;
+  const t      = performance.now() / 1000;
+  let r  = size * 0.44 * pop;
+  let ri = r * 0.42;
+
+  // Selection ring
+  if (selected && !grouped) {
+    ctx.globalAlpha = alpha;
+    ctx.beginPath(); ctx.arc(x, y, size * 0.60, 0, Math.PI * 2);
+    ctx.strokeStyle = '#3b82f6'; ctx.lineWidth = 3; ctx.stroke();
+  }
+
+  if (animation === 'shine') {
+    const pulse = 0.5 + 0.5 * Math.sin(t * Math.PI * 1.7);
+    r  *= 1 + 0.11 * pulse;
+    ri *= 1 + 0.11 * pulse;
+
+    // Glowing fill
+    ctx.globalAlpha = alpha;
+    ctx.shadowColor = '#fde68a';
+    ctx.shadowBlur  = 12 + 20 * pulse;
+    starPath(x, y, r, ri);
+    ctx.fillStyle = '#fef9c3'; ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Crisp stroke on top
+    starPath(x, y, r, ri);
+    ctx.strokeStyle = '#d97706';
+    ctx.lineWidth = Math.max(1.8, size * 0.046); ctx.stroke();
+
+  } else if (animation === 'twinkle') {
+    const fl    = 0.5 + 0.5 * Math.sin(t * 7.5 + (animPhase ?? 0));
+    const scale = 0.70 + 0.30 * fl;
+    r *= scale; ri *= scale;
+
+    ctx.globalAlpha = alpha * (0.38 + 0.62 * fl);
+    starPath(x, y, r, ri);
+    ctx.fillStyle = '#fbbf24'; ctx.fill();
+    ctx.strokeStyle = '#d97706';
+    ctx.lineWidth = Math.max(1.5, size * 0.042); ctx.stroke();
+
+  } else {
+    // Unselected / default — clean solid
+    ctx.globalAlpha = alpha;
+    starPath(x, y, r, ri);
+    ctx.fillStyle = '#fbbf24'; ctx.fill();
+    ctx.strokeStyle = '#b45309';
+    ctx.lineWidth = Math.max(1.8, size * 0.050); ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+// ── Draw planet (atom stage) ──────────────────────────────────────────
+function drawAtom(it) {
+  const t = performance.now() / 1000;
+  const pulse = 0.5 + 0.5 * Math.sin(t * 1.3 + (it.colorPhase ?? 0));
+  ctx.save();
+  ctx.globalAlpha = it.alpha;
+
+  const r    = it.size / 2;
+  const col  = it.color     || '#60a5fa';
+  const glow = it.glowColor || '#3b82f6';
+
+  // Selected ring — white halo
+  if (it.selected && !it.grouped) {
+    ctx.beginPath(); ctx.arc(it.x, it.y, r + 5, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = 2.2; ctx.stroke();
+  }
+
+  // Planet glow
+  ctx.shadowColor = glow;
+  ctx.shadowBlur  = r * 2.5 + r * 3.5 * pulse;
+  ctx.beginPath(); ctx.arc(it.x, it.y, r, 0, Math.PI * 2);
+  ctx.fillStyle = col; ctx.fill();
+  ctx.shadowBlur = 0;
+
+  // Specular highlight
+  ctx.beginPath();
+  ctx.arc(it.x - r * 0.27, it.y - r * 0.30, r * 0.36, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255,255,255,0.44)'; ctx.fill();
+
+  ctx.restore();
+}
+
+// ── Draw mole circle (dark-mode aware) ───────────────────────────────
+function drawGroup(g) {
+  if (!g.isMole || g.alpha <= 0) return;
+  const r    = g.animR ?? g.r;
+  const dark = document.body.classList.contains('dark');
+  ctx.save(); ctx.globalAlpha = g.alpha;
+  ctx.beginPath(); ctx.arc(g.cx, g.cy, r, 0, Math.PI * 2);
+  ctx.fillStyle   = dark ? 'rgba(96,165,250,0.10)' : 'rgba(59,130,246,0.06)'; ctx.fill();
+  ctx.strokeStyle = dark ? '#60a5fa' : '#3b82f6'; ctx.lineWidth = 3.5; ctx.stroke();
+  if (g.label) {
+    ctx.font = 'bold 18px "Segoe UI",sans-serif';
+    ctx.fillStyle = dark ? '#93c5fd' : '#1d4ed8';
+    ctx.textAlign = 'center';
+    ctx.fillText(g.label, g.cx, g.cy - r - 14);
+  }
+  ctx.restore();
+}
+
+// ── Render loop ───────────────────────────────────────────────────────
+function render() {
+  ctx.clearRect(0, 0, W, H);
+
+  const s = STAGES[stageIdx];
+  if (s && s.type === 'atom') {
+    ctx.fillStyle = '#030712'; ctx.fillRect(0, 0, W, H);
+    const t = performance.now() / 1000;
+    for (const bs of bgStars) {
+      const tw = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(t * bs.speed + bs.phase));
+      ctx.globalAlpha = bs.baseAlpha * tw;
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath(); ctx.arc(bs.x, bs.y, bs.r, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  for (const it of items) {
+    if (it.alpha <= 0) continue;
+    if (it.type === 'avo') drawStar(it); else drawAtom(it);
+  }
+  for (const g of groups) drawGroup(g);
+  requestAnimationFrame(render);
+}
+requestAnimationFrame(render);
+
+// ── Layout ────────────────────────────────────────────────────────────
+function gridPos(count, size, yMin, yMax) {
+  const pad = size*1.5, aW = W-pad*2, aH = yMax-yMin-pad*2;
+  let cols = Math.round(Math.sqrt(count*aW/aH));
+  cols = Math.max(1, Math.min(count, cols));
+  const rows = Math.ceil(count/cols), c = Math.ceil(count/rows);
+  const sx = Math.min(aW/Math.max(c-1,1), size*2.3);
+  const sy = Math.min(aH/Math.max(rows-1,1), size*2.3);
+  const ox = W/2-((c-1)*sx)/2, oy = yMin+pad+(aH-(rows-1)*sy)/2;
+  return Array.from({length:count},(_,i)=>({x:ox+(i%c)*sx, y:oy+Math.floor(i/c)*sy}));
+}
+
+function randomPos(count, size, yMin, yMax) {
+  const out=[], m=size*0.9;
+  for(let i=0;i<count;i++){
+    let x,y,ok,t=0;
+    do{ x=m+Math.random()*(W-m*2); y=yMin+m+Math.random()*(yMax-yMin-m*2);
+        ok=out.every(p=>Math.hypot(p.x-x,p.y-y)>size*1.5); }while(!ok&&++t<80);
+    out.push({x,y});
+  } return out;
+}
+
+function circularPos(count, size, cx, cy, maxR) {
+  const out=[];
+  for(let i=0;i<count;i++){
+    let x,y,ok,t=0;
+    do{ const r=Math.sqrt(Math.random())*maxR, a=Math.random()*Math.PI*2;
+        x=cx+Math.cos(a)*r; y=cy+Math.sin(a)*r;
+        ok=out.every(p=>Math.hypot(p.x-x,p.y-y)>size*1.5); }while(!ok&&++t<120);
+    out.push({x,y});
+  } return out;
+}
+
+// ── Spawn ─────────────────────────────────────────────────────────────
+function spawnItems(arr, stagger) {
+  arr.forEach((it,i)=>{ it.alpha=0; setTimeout(()=>{
+    const t0=performance.now();
+    (function tick(now){ it.alpha=Math.min(1,(now-t0)/200); if(it.alpha<1)requestAnimationFrame(tick); })(performance.now());
+  },i*stagger); });
+}
+
+// ── Mole circle animation ─────────────────────────────────────────────
+function animCircle(g, onDone) {
+  g.animR=0; g.alpha=0;
+  const t0=performance.now();
+  (function tick(now){ const p=Math.min(1,(now-t0)/650), e=1-Math.pow(1-p,3);
+    g.alpha=e; g.animR=g.r*e;
+    if(p<1) requestAnimationFrame(tick); else{g.alpha=1;g.animR=g.r;onDone&&onDone();} })(performance.now());
+}
+
+// ── Dozen grouping: shine or twinkle, with born-pop ───────────────────
+function formDozen(batch, onDone) {
+  const gid  = dozenCount++;
+  const anim = gid % 2 === 0 ? 'shine' : 'twinkle';
+  const now  = performance.now();
+  batch.forEach(it => {
+    it.selected=false; it.grouped=true; it.groupId=gid;
+    it.animation=anim; it.animPhase=Math.random()*Math.PI*2; it.animBorn=now;
+  });
+  setTimeout(()=>onDone&&onDone(), 60);
+}
+
+function autoGroupAll(delay, onDone) {
+  const rem = items.filter(it=>!it.grouped);
+  if(rem.length<12){onDone&&onDone();return;}
+  formDozen(rem.slice(0,12), ()=>{
+    updateAvoCounter();
+    setTimeout(()=>autoGroupAll(delay,onDone), delay);
+  });
+}
+
+// ── Counter / complete ────────────────────────────────────────────────
+function updateAvoCounter() {
+  const s   = STAGES[stageIdx];
+  const sel = items.filter(it=>it.selected&&!it.grouped).length;
+  elCount.innerHTML =
+    `Selected: <span class="hl">${sel}</span> &nbsp;|&nbsp; `+
+    `Dozens: <span class="hl">${dozenCount} / ${s.dozenGoal}</span>`+
+    (sel===12?' &nbsp;✓ That\'s a dozen!':'');
+}
+
+function checkAvoComplete() {
+  const s=STAGES[stageIdx];
+  if(dozenCount>=s.dozenGoal){
+    elInstr.innerHTML=`🎉 You found all <strong>${s.dozenGoal} dozens</strong>! Shining = 1st dozen, twinkling = 2nd. A dozen is just a counting word for 12.`;
+    elCount.textContent=''; elHint.textContent=''; btnNext.disabled=false;
+  }
+}
+
+// ── Click handler ─────────────────────────────────────────────────────
+canvas.addEventListener('click', e=>{
+  if(busy) return;
+  const s=STAGES[stageIdx];
+  if(!s||s.type==='text') return;
+  let best=null, bestD=Infinity;
+  for(const it of items){
+    if(it.grouped||it.alpha<0.5) continue;
+    const d=Math.hypot(it.x-e.clientX,it.y-e.clientY);
+    if(d<it.size*1.1&&d<bestD){best=it;bestD=d;}
+  }
+  if(!best) return;
+  best.selected=!best.selected;
+  if(s.type==='avo'){
+    updateAvoCounter();
+    const sel=items.filter(it=>it.selected&&!it.grouped);
+    if(sel.length===12){ busy=true; setTimeout(()=>formDozen(sel,()=>{busy=false;updateAvoCounter();checkAvoComplete();}),150); }
+  } else { onAtomClick(); }
+});
+
+// ── Atom / planet stage ───────────────────────────────────────────────
+function onAtomClick(){
+  atomClicks++;
+  const sel=items.filter(it=>it.selected&&!it.grouped).length;
+  elCount.innerHTML=`You selected <span class="hl">${sel}</span> planet${sel!==1?'s':''} out of <span class="mark">602,200,000,000,000,000,000,000</span>`;
+  if(atomClicks>=3){
+    elInstr.innerHTML=
+      `Even at 1 click per second, selecting them all would take `+
+      `<span class="mark">1.9 × 10<sup>16</sup> years</span> — `+
+      `a million times longer than the age of the universe.<br>`+
+      `<span style="opacity:0.75">We need a smarter counting word.</span>`;
+    btnNext.disabled=false; elHint.textContent='There must be a better way...';
+  }
+}
+
+// ── Mole reveal ───────────────────────────────────────────────────────
+function doMoleReveal(){
+  busy=true;
+  elInstr.innerHTML='Scientists solved this by inventing a new counting word...';
+  setTimeout(()=>{
+    items.forEach(it=>it.selected=true);
+    setTimeout(()=>{
+      items.forEach(it=>it.selected=false);
+      const g={cx:W/2,cy:H*0.52,r:moleR,animR:0,alpha:0,label:'1 mol  =  6.022 × 10²³ atoms',isMole:true};
+      groups.push(g);
+      animCircle(g,()=>{busy=false;showMoleEnd();});
+    },600);
+  },1200);
+}
+
+function showMoleEnd(){
+  elTitle.textContent='1 Mole  =  6.022 × 10²³';
+  elInstr.innerHTML=`
+    Just like <span class="mark">1 dozen = 12</span> things,<br>
+    <span class="mark">1 mole = 6.022 × 10²³</span> particles.<br><br>
+    This number is the <span class="mark">Avogadro Constant (N<sub>A</sub>)</span>.<br>
+    It lets chemists count microscopic atoms using ordinary-sized numbers.`;
+  elCount.textContent=''; elHint.textContent='';
+  btnNext.textContent='↺ Start Over'; btnNext.disabled=false;
+}
+
+// ── Shared line revealer ──────────────────────────────────────────────
+function revealLines(lines, unlockAt){
+  elInstr.innerHTML='';
+  lines.forEach(l=>{setTimeout(()=>{
+    const d=document.createElement('div');
+    d.innerHTML=l.html;
+    const dur=l.slow?'1.8s':'1.3s';
+    d.style.cssText=`margin-top:18px;opacity:0;transform:translateY(14px);
+      transition:opacity ${dur} ease,transform ${dur} ease;
+      line-height:1.85;font-size:1.35rem;color:#111827;text-align:center;${l.style||''}`;
+    elInstr.appendChild(d);
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{d.style.opacity='1';d.style.transform='translateY(0)';}));
+  },l.delay);});
+  setTimeout(()=>btnNext.disabled=false, unlockAt);
+}
+
+// ── Text stage A: Mole & Nₐ ──────────────────────────────────────────
+function initMoleStage(){
+  revealLines([
+    {html:'✦ &nbsp;Here\'s the way that could lead you to find out the microworld.',
+     delay:300,style:'font-size:1.5rem;font-style:italic;color:#1e40af;font-weight:600;'},
+    {html:'Atoms are incredibly small — too tiny to count one by one.',
+     delay:2200},
+    {html:'So scientists invented a counting unit, just like a <em>dozen</em> means 12:',
+     delay:4000},
+    {html:'<span class="mark" style="font-size:1.5em;padding:6px 20px">1 mole = 6.022 × 10²³ particles</span>',
+     delay:5800},
+    {html:'The number 6.022 × 10²³ is the <span class="mark">Avogadro Constant (N<sub>A</sub>)</span>.',
+     delay:7800},
+    {html:'Just like you say <em>"2 dozen eggs"</em>, a chemist says <em>"2 moles of atoms"</em>.',
+     delay:9800},
+  ], 11800);
+}
+
+// ── Text stage B: Carbon & the scale ─────────────────────────────────
+function initCarbonStage(){
+  revealLines([
+    {html:'Now — why <strong>carbon</strong>, and why <strong>12 g</strong>?',
+     delay:300},
+    {html:'Carbon-12 has an atomic mass of <span class="mark">12 amu</span>.<br><span style="font-size:0.9rem;color:#6b7280">The amu (atomic mass unit) is the scale atoms are measured in.</span>',
+     delay:2000},
+    {html:'N<sub>A</sub> was chosen so that <span class="mark">1 mole of carbon-12 = exactly 12 g</span>.<br><span style="font-size:0.9rem;color:#6b7280">Mass in amu becomes mass in grams. That\'s the bridge.</span>',
+     delay:4200},
+    {html:'That 12 g chip of carbon contains:',
+     delay:6400},
+    {html:'<div style="margin-top:16px;background:#eff6ff;border-radius:14px;padding:18px 28px;display:inline-block;box-shadow:0 2px 12px rgba(59,130,246,0.10)"><span style="font-size:2.1em;font-weight:800;color:#111827;letter-spacing:-1px;font-family:monospace">602,200,000,000,000,000,000,000</span><div style="color:#6b7280;font-size:1rem;margin-top:6px">atoms — exactly 1 mole</div></div>',
+     delay:7900,slow:true},
+    {html:'Grouping them into dozens would take <span class="mark">longer than the age of the universe</span>.',
+     delay:11200},
+    {html:'That is why <span class="mark">mole</span> exists — the right-sized word for the atomic world.',
+     delay:13700},
+  ], 15700);
+}
+
+// ── Intro stage ───────────────────────────────────────────────────────
+function initIntroStage() {
+  elInstr.innerHTML = '';
+
+  const cards = [
+    {
+      delay: 300,
+      border: '#fbbf24', bg: '#fffbeb',
+      num: '1',
+      title: 'The dozen analogy',
+      body: 'A mole is just a <strong>counting word</strong> — like a dozen = 12, a <span class="mark">mole = 6.022 × 10²³</span>.',
+    },
+    {
+      delay: 1700,
+      border: '#fbbf24', bg: '#fffbeb',
+      num: '2',
+      title: 'Why such a huge number?',
+      body: 'Chemists needed N<sub>A</sub> big enough that <strong>atomic-scale masses become lab-scale masses</strong> — something you can weigh in grams.',
+    },
+    {
+      delay: 3200,
+      border: '#fbbf24', bg: '#fffbeb',
+      num: '3',
+      title: 'The atomic mass unit (amu)',
+      body: 'Atoms are measured in amu. By definition, <span class="mark">carbon-12 has a mass of exactly 12 amu</span>.',
+    },
+    {
+      delay: 4700,
+      border: '#3b82f6', bg: '#eff6ff',
+      num: '4',
+      title: 'The bridge clicks naturally',
+      body: 'Take exactly N<sub>A</sub> atoms of carbon-12 → mass in grams <em>numerically equals</em> mass in amu.<br><strong>N<sub>A</sub> was chosen precisely to make this work.</strong>',
+    },
+    {
+      delay: 6200,
+      border: '#3b82f6', bg: '#eff6ff',
+      num: '5',
+      title: 'Molar mass follows',
+      body: 'For <em>any</em> element: its <span class="mark">atomic mass in amu = molar mass in g/mol</span>.',
+    },
+    {
+      delay: 7700,
+      border: '#6366f1', bg: '#eef2ff',
+      insight: true,
+      body: `<em>N<sub>A</sub> wasn't discovered — it was <strong>defined</strong> to bridge the atomic scale (amu) and the human scale (grams).<br>
+             The carbon-12 = 12 g fact is the <strong>definition</strong>, not a coincidence.</em>`,
+    },
+  ];
+
+  cards.forEach(c => {
+    setTimeout(() => {
+      const d = document.createElement('div');
+      d.style.cssText = `
+        max-width:600px; margin:10px auto 0; padding:14px 20px;
+        background:${c.bg}; border-left:4px solid ${c.border};
+        border-radius:0 12px 12px 0;
+        font-size:1.05rem; color:#111827; line-height:1.72;
+        opacity:0; transform:translateY(10px);
+        transition:opacity 0.85s ease, transform 0.85s ease;`;
+      if (c.insight) {
+        d.innerHTML = `<span style="font-size:0.78rem;font-weight:700;letter-spacing:.08em;color:#6366f1;text-transform:uppercase">Key insight</span><br>${c.body}`;
+      } else {
+        d.innerHTML = `<span style="font-size:0.78rem;font-weight:700;letter-spacing:.08em;color:#9ca3af;text-transform:uppercase">Step ${c.num}</span> &nbsp;<strong>${c.title}</strong><br><span style="color:#374151">${c.body}</span>`;
+      }
+      elInstr.appendChild(d);
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        d.style.opacity = '1'; d.style.transform = 'translateY(0)';
+      }));
+    }, c.delay);
+  });
+
+  setTimeout(() => { btnNext.textContent = 'Begin →'; btnNext.disabled = false; }, 9200);
+}
+
+// ── Stage definitions ─────────────────────────────────────────────────
+const STAGES=[
+  {id:0,title:'What is a Dozen?',type:'avo',count:24,size:56,dozenGoal:2,
+   instruction:'You have <strong>24 stars</strong>. Click any 12 to select them — a group of 12 is called a <span class="mark">dozen</span>!',
+   hint:'Click stars to select. 12 selected = 1 dozen.'},
+
+  {id:1,title:'Dozens Scale Up',type:'avo',count:60,size:42,dozenGoal:5,autoGroup:true,
+   instruction:'Now <strong>60 stars</strong>. The dozen idea still works — watch them group!',
+   hint:''},
+
+  {id:2,title:'What is a Mole?',type:'text-mole',instruction:'',hint:''},
+  {id:3,title:'Carbon & the Scale',type:'text-carbon',instruction:'',hint:''},
+
+  {id:4,title:'Can you circle a dozen?',type:'atom',count:220,size:11,
+   instruction:'A 12 g chip of carbon contains <span class="mark">6.022 × 10²³</span> atoms — each a world of its own. Try clicking some...',
+   hint:'Click the planets to try to select 12.'},
+
+  {id:5,title:'The Avogadro Constant',type:'atom',count:220,size:11,autoReveal:true,instruction:'',hint:''},
+];
+
+// ── Dark mode toggle ──────────────────────────────────────────────────
+function setDarkMode(on){document.body.classList.toggle('dark',on);}
+
+// ── Init stage ────────────────────────────────────────────────────────
+function initStage(n){
+  stageIdx=n; items=[]; groups=[]; dozenCount=0;
+  busy=false; atomClicks=0; moleR=0;
+  btnNext.disabled=true; btnNext.textContent='Next →';
+
+  const s=STAGES[n];
+  setDarkMode(s.type==='atom');
+  elTitle.textContent=s.title; elInstr.innerHTML=s.instruction;
+  elHint.textContent=s.hint;   elCount.textContent='';
+
+  if(s.type==='text-mole'  ){initMoleStage();  return;}
+  if(s.type==='text-carbon'){initCarbonStage();return;}
+
+  const yMin=138, yMax=H-88;
+  let positions;
+  if(s.autoReveal){
+    moleR=Math.min(W,H)*0.36;
+    positions=circularPos(s.count,s.size,W/2,H*0.52,moleR-s.size);
+  } else if(s.type==='atom'){
+    positions=randomPos(s.count,s.size,yMin,yMax);
+  } else {
+    positions=gridPos(s.count,s.size,yMin,yMax);
+  }
+
+  positions.forEach(p=>{
+    const pc=PLANET_PALETTE[Math.floor(Math.random()*PLANET_PALETTE.length)];
+    items.push({
+      x:p.x, y:p.y, size:s.size,
+      type:s.type==='atom'?'atom':'avo',
+      alpha:0, selected:false, grouped:false, groupId:-1,
+      animation:null, animPhase:0, animBorn:0,
+      color:pc.fill, glowColor:pc.glow,
+      colorPhase:Math.random()*Math.PI*2,
+    });
+  });
+
+  if(s.type==='atom') generateBgStars();
+
+  const stagger=s.count>60?3:s.count>24?8:14;
+  spawnItems(items,stagger);
+  const readyAt=stagger*s.count+350;
+
+  if(s.autoGroup){
+    setTimeout(()=>{
+      updateAvoCounter();
+      autoGroupAll(900,()=>{
+        elInstr.innerHTML=`All <strong>${s.dozenGoal} dozens</strong> grouped! Shining = 1st, twinkling = 2nd. But what if we had <em>way</em> more?`;
+        elCount.textContent=''; elHint.textContent=''; btnNext.disabled=false;
+      });
+    },readyAt); return;
+  }
+  if(s.autoReveal){setTimeout(()=>doMoleReveal(),readyAt);return;}
+  setTimeout(()=>{if(s.type==='avo')updateAvoCounter();},readyAt);
+}
+
+// ── Next ──────────────────────────────────────────────────────────────
+btnNext.addEventListener('click',()=>{
+  if(stageIdx>=STAGES.length-1) initStage(0); else initStage(stageIdx+1);
+});
+
+initStage(0);
+</script>
+</body>
+</html>
